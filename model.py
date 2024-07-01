@@ -46,11 +46,12 @@ class MidiBert(nn.Module):
 
         # word_emb: embeddings to change token ids into embeddings
         self.word_emb = []
-        self.linear_emb = []
+        # self.linear_emb = []
         for i, key in enumerate(self.classes):  # 将每个特征都Embedding到256维，Embedding参数是可学习的
             self.word_emb.append(Embeddings(self.n_tokens[i], self.emb_sizes[i]))
-            self.linear_emb.append(nn.Linear(self.n_tokens[i], self.emb_sizes[i]))
+            # self.linear_emb.append(nn.Linear(self.n_tokens[i], self.emb_sizes[i]))
         self.word_emb = nn.ModuleList(self.word_emb)
+        # self.linear_emb = nn.ModuleList(self.linear_emb)
 
         # linear layer to merge embeddings from different token types
         self.in_linear = nn.Linear(int(np.sum(self.emb_sizes)), bertConfig.d_model)
@@ -69,15 +70,16 @@ class MidiBert(nn.Module):
         # convert input_ids into embeddings and merge them through linear layer
         embs = []
         for i, key in enumerate(self.classes):
-            if x is None:
-                embs.append(self.word_emb[i](input_ids[..., i]))
-            else:
-                emb_result = self.word_emb[i](input_ids[..., i])
-                linear_result = self.linear_emb[i](x[i])
-                embs.append(emb_result+(linear_result-linear_result.detach()))
+            # if x is None:
+            #     embs.append(self.word_emb[i](input_ids[..., i]))
+            # else:
+            #     emb_result = self.word_emb[i](input_ids[..., i])
+            #     linear_result = self.linear_emb[i](x[i])
+            #     embs.append(emb_result+(linear_result-linear_result.detach()))
+            embs.append(self.word_emb[i](input_ids[..., i]))
         embs = torch.cat([*embs], dim=-1)
 
-        embs = self.tw_attention(embs)
+        # embs = self.tw_attention(embs)
 
         emb_linear = self.in_linear(embs)
 
@@ -238,6 +240,19 @@ class GRL(Function):
     def backward(ctx, grad_output):
         output = grad_output.neg() * ctx.alpha
         return output, None
+
+
+class GatherWithGrad(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, indices):
+        ctx.save_for_backward(x, indices)
+        return x.gather(1, indices)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        x, indices = ctx.saved_tensors
+        grad_x = torch.zeros_like(x).scatter_(1, indices, grad_output)
+        return grad_x, None
 
 # class Discriminator(nn.Module):
 #     def __init__(self, midibert, hs):
