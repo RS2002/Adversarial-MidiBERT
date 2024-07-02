@@ -9,7 +9,9 @@ import pickle
 import os
 from torch.utils.data import DataLoader
 from dataset import FinetuneDataset
-
+from peft import LoraConfig, get_peft_model
+import copy
+from pretrain import get_mask_ind
 
 def get_args():
     parser = argparse.ArgumentParser(description='')
@@ -39,6 +41,7 @@ def get_args():
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--cuda_devices", type=int, nargs='+',
                         default=[5, 7], help="CUDA device ids")
+    parser.add_argument('--mask', action="store_true")
     args = parser.parse_args()
 
     # check args
@@ -78,7 +81,7 @@ def load_data(dataset, data_root=None):
 
     return X_train, X_val, X_test, y_train, y_val, y_test
 
-def iteration(model,midibert,optim,data_loader,task,device,train=True):
+def iteration(model,midibert,optim,data_loader,task,device,train=True,mask=False):
     if train:
         model.train()
         torch.set_grad_enabled(True)
@@ -96,19 +99,56 @@ def iteration(model,midibert,optim,data_loader,task,device,train=True):
         x = x.long()
         label = label.long()
         attn_mask = (x[..., 0] != midibert.bar_pad_word).float().to(device)
-        y=model(x,attn=attn_mask)
+
+        batch, seq_len, _ = x.shape
+        input_ids = copy.deepcopy(x)
+        loss_mask = None
+        if mask:
+            for b in range(batch):
+                loss_mask = torch.zeros(batch, seq_len).to(device)
+                mask80, rand10, cur10 = get_mask_ind(mask_percent=0.15)
+                for i in mask80:
+                    mask_word = torch.tensor(midibert.mask_word_np).to(device)
+                    input_ids[b][i] = mask_word
+                    loss_mask[b][i] = 1
+                for i in rand10:
+                    rand_word = torch.tensor(midibert.get_rand_tok()).to(device)
+                    input_ids[b][i] = rand_word
+                    loss_mask[b][i] = 1
+
+
+        y=model(input_ids,attn=attn_mask,layer=-1)
         output = torch.argmax(y,dim=-1)
         if task=="emotion" or task=="composer":
             loss_func = nn.CrossEntropyLoss()
             loss=loss_func(y,label)
             acc = torch.mean((output==label).float())
         else:
-            loss_func = nn.CrossEntropyLoss(reduction="none")
-            loss = loss_func(y,label)
-            loss = torch.sum(loss*attn_mask)/torch.sum(attn_mask)
-            acc = torch.sum((output == label).float()*attn_mask)/torch.sum(attn_mask)
+
+            if loss_mask is None:
+                # loss_func = nn.CrossEntropyLoss(reduction="none")
+                # loss = loss_func(y.reshape(label.shape[0]*label.shape[1],-1),label.reshape(label.shape[0]*label.shape[1])).reshape(label.shape[0],label.shape[1])
+                # loss = torch.sum(loss*attn_mask)/torch.sum(attn_mask)
+                # acc = torch.sum((output == label.reshape(label.shape[0],label.shape[1])).float()*attn_mask)/torch.sum(attn_mask)
+
+                loss_func = nn.CrossEntropyLoss()
+                loss = loss_func(y.reshape(label.shape[0]*label.shape[1],-1), label.reshape(label.shape[0]*label.shape[1]))
+                # acc = torch.mean((output == label.reshape(label.shape[0],label.shape[1])).float())
+                acc = torch.sum((output == label.reshape(label.shape[0],label.shape[1])).float()*attn_mask)/torch.sum(attn_mask)
+            else:
+                loss_func = nn.CrossEntropyLoss(reduction="none")
+                loss = loss_func(y.reshape(label.shape[0]*label.shape[1],-1),label.reshape(label.shape[0]*label.shape[1])).reshape(label.shape[0],label.shape[1])
+                attn_mask = attn_mask * (1-loss_mask)
+                loss = torch.sum(loss*attn_mask)/torch.sum(attn_mask)
+                acc = torch.sum((output == label.reshape(label.shape[0],label.shape[1])).float()*attn_mask)/torch.sum(attn_mask)
 
         if train:
+
+            # l2_regularization = 0
+            # for param in model.parameters():
+            #     l2_regularization += torch.norm(param, 2)
+            # loss += 1e-4 * l2_regularization
+
             model.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 3.0)
@@ -134,7 +174,11 @@ def main():
                                hidden_size=args.hs)
     midibert = MidiBert(bertConfig=configuration, e2w=e2w, w2e=w2e).to(device)
     if not args.nopretrain:
-        midibert.load_state_dict(torch.load(args.model_path))
+        midibert.load_state_dict(torch.load(args.model_path,map_location ='cpu'))
+        # peft_config = LoraConfig(target_modules=['query', 'value', 'key'], r=8, lora_alpha=32, lora_dropout=0.1)
+        # midibert = get_peft_model(midibert, peft_config)
+        # midibert.print_trainable_parameters()
+
     task = args.task
     if task=="composer" or task=="emotion":
         model = SequenceClassification(midibert, args.class_num, args.hs).to(device)
@@ -162,24 +206,24 @@ def main():
     j = 0
     while True:
         j+=1
-        loss,acc=iteration(model, midibert, optim, train_loader, task, device, train=True)
+        loss,acc=iteration(model, midibert, optim, train_loader, task, device, train=True, mask=args.mask)
         log = "Epoch {:} | Train Loss {:06f} Train Acc {:06f} | ".format(j,loss,acc)
         with open(args.task+"_"+args.dataset+".txt",'a') as file:
             file.write(log)
         print(log)
-        loss,acc=iteration(model, midibert, optim, valid_loader, task, device, train=False)
+        loss,acc=iteration(model, midibert, optim, valid_loader, task, device, train=False, mask=args.mask)
         log = "Valid Loss {:06f} Valid Acc {:06f} | ".format(loss,acc)
         with open(args.task+"_"+args.dataset+".txt",'a') as file:
             file.write(log)
         print(log)
-        test_loss,test_acc=iteration(model, midibert, optim, test_loader, task, device, train=False)
+        test_loss,test_acc=iteration(model, midibert, optim, test_loader, task, device, train=False, mask=args.mask)
         log = "Test Loss {:06f} Test Acc {:06f}".format(test_loss,test_acc)
         with open(args.task+"_"+args.dataset+".txt",'a') as file:
             file.write(log+"\n")
         print(log)
 
         if acc >= best_acc or loss <= best_loss:
-            torch.save(model.state_dict(), args.task+"_"+args.dataset+".pth")
+            # torch.save(model.state_dict(), args.task+"_"+args.dataset+".pth")
             result_acc = test_acc
         if acc >= best_acc:
             best_acc = acc

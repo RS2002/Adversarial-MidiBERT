@@ -11,6 +11,7 @@ from dataset import MidiDataset
 import tqdm
 import random
 import copy
+import math
 
 def get_args():
     parser = argparse.ArgumentParser(description='')
@@ -103,7 +104,6 @@ def iteration(midibert,model,masker,discriminator,optim_midibert,optim_model,opt
         batch,seq_len,_ = x.shape
         input_ids = copy.deepcopy(x)
         loss_mask = torch.zeros(batch, seq_len).to(device)
-
         real_mask = torch.zeros(batch, seq_len).to(device)
         attn_mask = (x[..., 0] != midibert.bar_pad_word).float().to(device)
         mask_num_list = []
@@ -112,7 +112,8 @@ def iteration(midibert,model,masker,discriminator,optim_midibert,optim_model,opt
             current_mask_book = mask_book[index]
             mask_percent = mask_percent * current_mask_book
             for b in range(batch):
-                mask_num = min(int(random.uniform(0.1, 0.3)*torch.sum(current_mask_book[b])),int(1024*0.15))
+                # mask_num = int(random.uniform(0.1, 0.7)*torch.sum(current_mask_book[b]))
+                mask_num = min(int(random.uniform(0.1, 0.3)*torch.sum(current_mask_book[b])),int(seq_len*0.15))
 
                 mask_num_list.append(mask_num)
                 _,mask_ind = torch.topk(mask_percent[b],mask_num)
@@ -131,6 +132,7 @@ def iteration(midibert,model,masker,discriminator,optim_midibert,optim_model,opt
                     loss_mask[b][i] = 1
         else:
             for b in range(batch):
+                # mask80, rand10, cur10 = get_mask_ind(mask_percent=random.uniform(0.1, 0.4))
                 mask80, rand10, cur10 = get_mask_ind(mask_percent=0.15)
                 for i in mask80:
                     mask_word = torch.tensor(midibert.mask_word_np).to(device)
@@ -150,7 +152,6 @@ def iteration(midibert,model,masker,discriminator,optim_midibert,optim_model,opt
         loss_mse = nn.MSELoss()
         loss = 0
         loss_mask=loss_mask.reshape([batch*seq_len])
-        real_mask=real_mask.reshape([batch*seq_len])
         loss_total=torch.zeros_like(loss_mask).to(device)
         if last_acc is not None:
             weight=get_weight(last_acc)
@@ -160,7 +161,7 @@ def iteration(midibert,model,masker,discriminator,optim_midibert,optim_model,opt
             predict=y[i].reshape([batch*seq_len,-1])
             gt=x[...,i].reshape([batch*seq_len])
             loss_current=loss_cls(predict,gt.long()) * weight[i]
-            loss_total+=loss_current * real_mask
+            loss_total+=loss_current
             loss += torch.sum(loss_current*loss_mask)/torch.sum(loss_mask)
             loss += torch.mean(loss_current)
             output = torch.argmax(predict,dim=-1)
@@ -173,17 +174,18 @@ def iteration(midibert,model,masker,discriminator,optim_midibert,optim_model,opt
                 generation=torch.concat([generation,output],dim=-1)
         loss_list.append(loss.item())
         if train:
-            real_mask=real_mask.reshape([batch,seq_len])
+            # loss_mask=loss_mask.reshape([batch,seq_len])
+            loss_mask=real_mask.reshape([batch,seq_len])
             loss_total=loss_total.reshape([batch,seq_len])
 
             loss_masker=0
             for b in range(batch):
                 select_num = int(0.3*mask_num_list[b])
-                loss_total[b][real_mask[b] == 0] = 0
+                loss_total[b][loss_mask[b] == 0] = 0
                 _,index1=torch.topk(loss_total[b],select_num)
                 gt1=torch.ones_like(mask_percent[b,index1]).to(device)
                 loss1=loss_mse(mask_percent[b,index1],gt1)
-                loss_total[b][real_mask[b]==0]=1e8
+                loss_total[b][loss_mask[b]==0]=1e8
                 loss_total=-loss_total
                 _,index0=torch.topk(loss_total[b],select_num)
                 gt0=torch.zeros_like(mask_percent[b,index0]).to(device)
@@ -195,7 +197,7 @@ def iteration(midibert,model,masker,discriminator,optim_midibert,optim_model,opt
             # generation=generation.to(device)
             #
             # # result=discriminator(generation,attn=attn_mask,alpha=alpha,x=y)
-            # # real = real.reshape(-1).long()
+            # # real = real_mask.reshape(-1).long()
             # # result = result.reshape(-1,2)
             # # loss_discriminator=torch.mean(loss_cls(result,real))
             #
@@ -235,17 +237,15 @@ def update_maskbook(midibert,masker,mask_book,train_loader,device):
         batch = x.shape[0]
         attn_mask = (x[..., 0] != midibert.bar_pad_word).float().to(device)
         percentage=masker(x,attn=attn_mask)
-        mask_book[mask_book==0]=1
-        length=mask_book.shape[-1]
+        current_mask_book=mask_book[index]
+        percentage=percentage*current_mask_book
         for b in range(batch):
-            # Freeze the Top p% Tokens
-            freeze_num = int(random.uniform(0.1, 0.3) * length)
+            freeze_num = int(random.uniform(0.1, 0.3) * torch.sum(current_mask_book[b]))
             _, freeze_ind = torch.topk(percentage[b], freeze_num)
             mask_book[index[b],freeze_ind]=0
-            # Freeze q% Tokens Randomly
-            freeze_prop = random.uniform(0.05, 0.1)
+            unfreeze_prop = random.uniform(0, 0.1)
             rand = torch.rand(x.shape[1])
-            mask_book[index[b]][rand<freeze_prop]=0
+            mask_book[index[b]][rand<unfreeze_prop]=1
 
 
 def main():
@@ -280,8 +280,9 @@ def main():
     trainset = MidiDataset(X=X_train)
     validset = MidiDataset(X=X_val)
     train_loader = DataLoader(trainset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True)
-    test_loader = DataLoader(validset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True)
+    test_loader = DataLoader(validset, batch_size=args.batch_size, num_workers=args.num_workers)
     mask_book = torch.ones([X_train.shape[0],args.max_seq_len]).to(device)
+    # mask_book[X_train[...,0]==midibert.bar_pad_word]=0
 
     best_acc=0
     best_loss=1e8
