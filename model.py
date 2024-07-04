@@ -310,9 +310,19 @@ class TokenClassification(nn.Module):
             nn.Linear(256, class_num)
         )
 
+        # self.norm = nn.BatchNorm1d(hs)
+        # self.hs = hs
+
+
     def forward(self, y, attn, layer=-1):
         # feed to bert
         y = self.midibert(y, attn, output_hidden_states=True)
+
+        # batchsize = y.shape[0]
+        # y = y.view(-1,self.hs)
+        # y = self.norm(y)
+        # y = y.view(batchsize,-1,self.hs)
+
         # y = y.last_hidden_state         # (batch_size, seq_len, 768)
         y = y.hidden_states[layer]
         return self.classifier(y)
@@ -328,8 +338,18 @@ class SequenceClassification(nn.Module):
             nn.Linear(256, class_num)
         )
 
+        # self.norm = nn.BatchNorm1d(hs)
+        # self.hs = hs
+
+
     def forward(self, x, attn, layer=-1):  # x: (batch, 512, 4)
         x = self.midibert(x, attn, output_hidden_states=True)  # (batch, 512, 768)
+
+        # batchsize = x.shape[0]
+        # x = x.view(-1,self.hs)
+        # x = self.norm(x)
+        # x = x.view(batchsize,-1,self.hs)
+
         # y = y.last_hidden_state         # (batch_size, seq_len, 768)
         x = x.hidden_states[layer]
         attn_mat = self.attention(x)  # attn_mat: (batch, r, 512)

@@ -12,6 +12,7 @@ from dataset import FinetuneDataset
 from peft import LoraConfig, get_peft_model
 import copy
 from pretrain import get_mask_ind
+import random
 
 def get_args():
     parser = argparse.ArgumentParser(description='')
@@ -32,7 +33,7 @@ def get_args():
     parser.add_argument('--hs', type=int, default=768)
     parser.add_argument("--index_layer", type=int,
                         default=12, help="number of layers")
-    parser.add_argument('--epochs', type=int, default=50,
+    parser.add_argument('--epochs', type=int, default=10,
                         help='number of training epochs')
     parser.add_argument('--lr', type=float, default=2e-5,
                         help='initial learning rate')
@@ -42,6 +43,7 @@ def get_args():
     parser.add_argument("--cuda_devices", type=int, nargs='+',
                         default=[5, 7], help="CUDA device ids")
     parser.add_argument('--mask', action="store_true")
+    parser.add_argument('--aug', action="store_true")
     args = parser.parse_args()
 
     # check args
@@ -81,7 +83,7 @@ def load_data(dataset, data_root=None):
 
     return X_train, X_val, X_test, y_train, y_val, y_test
 
-def iteration(model,midibert,optim,data_loader,task,device,train=True,mask=False):
+def iteration(model,midibert,optim,data_loader,task,device,train=True,mask=False,aug=False):
     if train:
         model.train()
         torch.set_grad_enabled(True)
@@ -103,6 +105,27 @@ def iteration(model,midibert,optim,data_loader,task,device,train=True,mask=False
         batch, seq_len, _ = x.shape
         input_ids = copy.deepcopy(x)
         loss_mask = None
+
+        if aug:
+            for b in range(batch):
+                min = torch.min(x[b,:,3])
+                x[b,:,3][x[b,:,3]>127]=0
+                max = torch.max(x[b,:,3])
+
+                if min<11:
+                    min = -min
+                else:
+                    min = -11
+                if max>116:
+                    max = 127 - max
+                else:
+                    max = 11
+
+                rand = random.randint(min, max)
+                # rand = random.randint(-11, 11)
+                input_ids[b,:,3][input_ids[b,:,3]<128]+=rand
+
+
         if mask:
             for b in range(batch):
                 loss_mask = torch.zeros(batch, seq_len).to(device)
@@ -111,10 +134,10 @@ def iteration(model,midibert,optim,data_loader,task,device,train=True,mask=False
                     mask_word = torch.tensor(midibert.mask_word_np).to(device)
                     input_ids[b][i] = mask_word
                     loss_mask[b][i] = 1
-                for i in rand10:
-                    rand_word = torch.tensor(midibert.get_rand_tok()).to(device)
-                    input_ids[b][i] = rand_word
-                    loss_mask[b][i] = 1
+                # for i in rand10:
+                #     rand_word = torch.tensor(midibert.get_rand_tok()).to(device)
+                #     input_ids[b][i] = rand_word
+                #     loss_mask[b][i] = 1
 
 
         y=model(input_ids,attn=attn_mask,layer=-1)
@@ -124,7 +147,6 @@ def iteration(model,midibert,optim,data_loader,task,device,train=True,mask=False
             loss=loss_func(y,label)
             acc = torch.mean((output==label).float())
         else:
-
             if loss_mask is None:
                 # loss_func = nn.CrossEntropyLoss(reduction="none")
                 # loss = loss_func(y.reshape(label.shape[0]*label.shape[1],-1),label.reshape(label.shape[0]*label.shape[1])).reshape(label.shape[0],label.shape[1])
@@ -138,7 +160,8 @@ def iteration(model,midibert,optim,data_loader,task,device,train=True,mask=False
             else:
                 loss_func = nn.CrossEntropyLoss(reduction="none")
                 loss = loss_func(y.reshape(label.shape[0]*label.shape[1],-1),label.reshape(label.shape[0]*label.shape[1])).reshape(label.shape[0],label.shape[1])
-                attn_mask = attn_mask * (1-loss_mask)
+                # attn_mask = attn_mask * (1-loss_mask)
+                attn_mask = 1 - loss_mask
                 loss = torch.sum(loss*attn_mask)/torch.sum(attn_mask)
                 acc = torch.sum((output == label.reshape(label.shape[0],label.shape[1])).float()*attn_mask)/torch.sum(attn_mask)
 
@@ -206,17 +229,21 @@ def main():
     j = 0
     while True:
         j+=1
-        loss,acc=iteration(model, midibert, optim, train_loader, task, device, train=True, mask=args.mask)
+        loss,acc=iteration(model, midibert, optim, train_loader, task, device, train=True, mask=args.mask,aug=args.aug)
+        # loss,acc=iteration(model, midibert, optim, train_loader, task, device, train=True, mask=args.mask,aug=False)
         log = "Epoch {:} | Train Loss {:06f} Train Acc {:06f} | ".format(j,loss,acc)
         with open(args.task+"_"+args.dataset+".txt",'a') as file:
             file.write(log)
         print(log)
-        loss,acc=iteration(model, midibert, optim, valid_loader, task, device, train=False, mask=args.mask)
+        loss,acc=iteration(model, midibert, optim, valid_loader, task, device, train=False, mask=args.mask,aug=args.aug)
+        # loss,acc=iteration(model, midibert, optim, valid_loader, task, device, train=False, mask=args.mask, aug=False)
+
         log = "Valid Loss {:06f} Valid Acc {:06f} | ".format(loss,acc)
         with open(args.task+"_"+args.dataset+".txt",'a') as file:
             file.write(log)
         print(log)
-        test_loss,test_acc=iteration(model, midibert, optim, test_loader, task, device, train=False, mask=args.mask)
+        test_loss,test_acc=iteration(model, midibert, optim, test_loader, task, device, train=False, mask=args.mask,aug=args.aug)
+        # test_loss,test_acc=iteration(model, midibert, optim, test_loader, task, device, train=False, mask=args.mask, aug=False)
         log = "Test Loss {:06f} Test Acc {:06f}".format(test_loss,test_acc)
         with open(args.task+"_"+args.dataset+".txt",'a') as file:
             file.write(log+"\n")
