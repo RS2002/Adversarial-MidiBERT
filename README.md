@@ -38,3 +38,20 @@ python finetune.py --dict_file <the dictionary in PianoBART> --task <task name> 
 
 If you do not want to use pre-trained parameters, you should add `--nopretrain`.
 If you do not want to use mask fine-tuning or data augmentation, you should delete the `--mask` or `--aug`.
+
+
+
+## 4. Citation
+
+```
+@misc{zhao2024adversarialmidibertsymbolicmusicunderstanding,
+      title={Adversarial-MidiBERT: Symbolic Music Understanding Model Based on Unbias Pre-training and Mask Fine-tuning}, 
+      author={Zijian Zhao},
+      year={2024},
+      eprint={2407.08306},
+      archivePrefix={arXiv},
+      primaryClass={cs.SD},
+      url={https://arxiv.org/abs/2407.08306}, 
+}
+```
+
