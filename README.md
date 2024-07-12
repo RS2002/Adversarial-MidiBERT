@@ -1,6 +1,6 @@
 # Adversarial-MidiBERT
 
-**Article:** Zijian Zhao*, “Adversarial-MidiBERT: Symbolic Music Understanding Model Based on Unbias Pre-training and Mask Fine-tuning” (under way)
+**Article:** Zijian Zhao*, “[Adversarial-MidiBERT: Symbolic Music Understanding Model Based on Unbias Pre-training and Mask Fine-tuning (arxiv.org)](https://arxiv.org/abs/2407.08306)”
 
 ![](./img/main.png)
 
@@ -19,6 +19,8 @@ You can refer the detail in our previous work [PianoBART](https://github.com/RS2
 
 
 ## 2. Pre-train
+
+![](./img/pretrain.png)
 
 ```bash
 python pretrain.py --dict_file <the dictionary in PianoBART>
