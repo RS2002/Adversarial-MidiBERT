@@ -1,6 +1,7 @@
 # Adversarial-MidiBERT
 
-**Article:** Zijian Zhao*, “[Adversarial-MidiBERT: Symbolic Music Understanding Model Based on Unbias Pre-training and Mask Fine-tuning (arxiv.org)](https://arxiv.org/abs/2407.08306)”
+**Article:** Zijian Zhao*, “[Let Network Decide What to Learn: Symbolic Music Understanding Model Based on Large-scale Adversarial Pre-training
+ (arxiv.org)](https://arxiv.org/abs/2407.08306)”
 
 ![](./img/main.png)
 
