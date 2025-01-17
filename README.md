@@ -45,10 +45,10 @@ If you do not want to use mask fine-tuning or data augmentation, you should dele
 ## 4. Citation
 
 ```
-@misc{zhao2024adversarialmidibertsymbolicmusicunderstanding,
-      title={Adversarial-MidiBERT: Symbolic Music Understanding Model Based on Unbias Pre-training and Mask Fine-tuning}, 
+@misc{zhao2025letnetworkdecidelearn,
+      title={Let Network Decide What to Learn: Symbolic Music Understanding Model Based on Large-scale Adversarial Pre-training}, 
       author={Zijian Zhao},
-      year={2024},
+      year={2025},
       eprint={2407.08306},
       archivePrefix={arXiv},
       primaryClass={cs.SD},
