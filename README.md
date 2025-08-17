@@ -2,6 +2,8 @@
 
 **Article:** Zijian Zhao*, “[Let Network Decide What to Learn: Symbolic Music Understanding Model Based on Large-scale Adversarial Pre-training](https://dl.acm.org/doi/abs/10.1145/3731715.3733483)”, ACM ICMR 2025
 
+**Notice:** We have uploaded our model and pre-trained parameters to [Hugging Face](https://huggingface.co/RS2002/Adversarial-MidiBERT).
+
 ![](./img/main.png)
 
 
